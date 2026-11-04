@@ -34,12 +34,13 @@
 
 ## 一斉アクセス (150〜250 人) への備え
 
-負荷試験 (2026-11-04、GitHub Pages、1 人 = 接続 1 本で HTML + CSS を取得):
+負荷試験 (2026-11-04、同一 IP から 1 人 = 接続 1 本で HTML + CSS を取得):
 
-| 条件 | 結果 |
+| 配信先・条件 | 結果 |
 |---|---|
-| 改善前 (1 人 11 リクエスト) | 250 人 × 2 回目で **HTTP 429** (同一 IP、約 5 分ブロック) |
-| 改善後 (1 人 2 リクエスト、125KB) | 250 人 × 3 回連続 = 750 回の表示で **エラー 0** |
+| GitHub Pages・改善前 (1 人 11 リクエスト) | 250 人 × 2 回目で **HTTP 429** (約 5 分ブロック) |
+| GitHub Pages・改善後 (1 人 2 リクエスト、125KB) | 250 人 × 3 回 = 750 回の表示で エラー 0 |
+| **Cloudflare Pages (本番)** | 250 人 × 5 回 = 1,250 回の表示で HTTP エラー 0 / IPv4 で 250 人 × 3 回 タイムアウトも 0、p95 約 6 秒 (試験側回線の帯域が上限) |
 
 学校は全員が同じ IP アドレスでアクセスするため、配信側の IP 単位のレート制限が一番の弱点。
 対策として、初回表示の JS/CSS を HTML に埋め込んでいる (`scripts/inline-assets.mjs`、`npm run build` に組み込み済み)。
@@ -54,7 +55,7 @@
 
 **運用上の注意**
 - 授業時間中は `main` に push しない (デプロイ直後の数分は配信が不安定になりうる)
-- 導入前に、学校のネットワークで `*.github.io` がフィルタで遮断されていないか確認する
+- 導入前に、学校のネットワークで `*.pages.dev` がフィルタで遮断されていないか確認する
 - 共用 PC・ログアウト時にデータが消える端末では、授業の終わりに「バックアップ保存」か Word 保存を習慣にする
 - 情報ハブの Google / Google Scholar は、同じ IP から大量に検索すると確認画面 (CAPTCHA) が出ることがある。CiNii・J-STAGE・国立国会図書館サーチ・KAKEN などを併用する
 
@@ -66,10 +67,25 @@ npm run dev     # http://localhost:3000
 npm run build   # out/ に静的サイトを書き出し
 ```
 
-## 公開 (GitHub Pages)
+## 公開 (本番: Cloudflare Pages)
 
-`main` に push すると `.github/workflows/pages.yml` が `out/` をビルドして GitHub Pages にデプロイします。
-リポジトリ名のサブパスで配信されるので、ビルド時に `NEXT_PUBLIC_BASE_PATH=/<repo名>` を渡しています。
+**本番 URL: https://tankyu-note-7oi.pages.dev**
+
+```bash
+npm run deploy   # ビルド → Cloudflare Pages へ直接アップロード (GitHub を経由しない)
+```
+
+- Cloudflare アカウント (kohki.haba@gmail.com) の Pages プロジェクト `tankyu-note`
+- 初回のみ `npx wrangler login` が必要。WSL ではブラウザが自動で開かないので
+  `npx wrangler login --browser=false` で表示される URL を Windows のブラウザで開く
+- wrangler は 4.151.3 に固定。`wrangler pages project create` は新しい版への自動移行
+  (OpenNext 化・package.json 書き換え) が走るので使わない。プロジェクト作成は済んでいる
+- 静的ファイルへのリクエスト・転送量は無料で無制限
+- `public/_headers` でキャッシュ (ハッシュ付きファイルは 1 年、HTML は毎回確認) を設定
+
+### 予備: GitHub Pages
+`main` に push すると `.github/workflows/pages.yml` が https://habatch.github.io/inquiry-buddy-lite/ にも配信する。
+GitHub Pages は同一 IP からの大量アクセスで HTTP 429 (約 5 分ブロック) になるため、学校への案内には使わない。
 
 ## 内容を編集する
 
