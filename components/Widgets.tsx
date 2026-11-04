@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { QUESTION_BANK } from "@/lib/steps";
 import { newsSearchUrl, topicsForInterests } from "@/lib/topicBank";
+import { relatedTopics, SEARCH_ANGLES, themeTerms } from "@/lib/relevance";
 
 const card = "rounded-xl border border-stone-200 bg-white p-4 shadow-sm";
 const linkBtn =
@@ -18,32 +19,66 @@ export function TopicsWidget({
   otherInterest?: string;
   customTopic?: string;
 }) {
-  const topics = topicsForInterests(interests);
+  const terms = themeTerms(customTopic, otherInterest);
+  const hasTheme = terms.length > 0;
+  // テーマが書かれていれば、関連する話題カードだけを出す。無ければ興味分野から。
+  const topics = hasTheme ? relatedTopics(terms) : topicsForInterests(interests);
+  const enc = encodeURIComponent;
+  const themeLinks = (t: string) => [
+    { label: "ニュース", url: newsSearchUrl(t) },
+    { label: "辞書・事典", url: `https://kotobank.jp/search?q=${enc(t)}` },
+    { label: "Wikipedia", url: `https://ja.wikipedia.org/w/index.php?search=${enc(t)}` },
+    { label: "論文 (CiNii)", url: `https://cir.nii.ac.jp/all?q=${enc(t)}` },
+    { label: "統計 (e-Stat)", url: `https://www.google.com/search?q=${enc("site:e-stat.go.jp " + t)}` },
+  ];
   return (
     <div className={card}>
       <h3 className="text-sm font-semibold text-stone-800">📰 考えるきっかけの話題</h3>
       <p className="mt-1 text-xs text-stone-500">
-        読んでみて「これ気になる」「これは別に」と感じるだけで OK。🔎 から最新のニュースを探せるよ。
+        読んでみて「これ気になる」「これは別に」と感じるだけで OK。🔎 から最新の情報を探せるよ。
       </p>
-      {otherInterest && (
-        <p className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-900">
-          ほかに興味がある分野: <span className="font-semibold">{otherInterest}</span>
-          <a
-            href={newsSearchUrl(otherInterest)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`${linkBtn} ml-2`}
-          >
-            🔎 この分野のニュースを探す
-          </a>
-        </p>
+
+      {hasTheme && (
+        <div className="mt-3 space-y-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
+          <p className="text-xs font-semibold text-amber-900">
+            🎯 あなたが書いたテーマに関連する情報
+          </p>
+          {terms.map((t) => (
+            <div key={t} className="rounded-lg bg-white p-3">
+              <p className="text-sm font-semibold text-stone-800">「{t}」</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {themeLinks(t).map((l) => (
+                  <a key={l.label} href={l.url} target="_blank" rel="noopener noreferrer" className={linkBtn}>
+                    🔎 {l.label}
+                  </a>
+                ))}
+              </div>
+              <p className="mt-2.5 text-xs text-stone-500">切り口を変えて探す:</p>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {SEARCH_ANGLES.map((a) => (
+                  <a
+                    key={a.suffix}
+                    href={`https://www.google.com/search?q=${enc(`${t} ${a.suffix}`)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={linkBtn}
+                  >
+                    {a.label}
+                  </a>
+                ))}
+              </div>
+            </div>
+          ))}
+          {customTopic && (
+            <p className="text-xs text-amber-900">
+              最初に書いたテーマ「{customTopic}」は、そのまま「気になること ①」に使っても OK だよ。
+            </p>
+          )}
+        </div>
       )}
-      {customTopic && (
-        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          最初に書いてくれたテーマ: <span className="font-semibold">{customTopic}</span>
-          <br />
-          これも「気になること」の 1 つとして使えるよ。
-        </p>
+
+      {hasTheme && topics.length > 0 && (
+        <p className="mt-4 text-xs font-semibold text-stone-600">テーマに近い話題</p>
       )}
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         {topics.map((t) => (
