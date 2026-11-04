@@ -9,16 +9,30 @@ import {
 
 interface Props {
   onSubmit: (profile: UserProfile) => void;
+  /** ホームから編集するとき: 今の内容 */
+  initial?: UserProfile | null;
+  /** ホームから編集するとき: 変更せずに戻る */
+  onCancel?: () => void;
 }
 
 type Tab = "age" | "interest" | "custom";
 
-export function Onboarding({ onSubmit }: Props) {
-  const [tab, setTab] = useState<Tab>("age");
-  const [age, setAge] = useState<string>("");
-  const [interests, setInterests] = useState<string[]>([]);
-  const [customTopic, setCustomTopic] = useState("");
-  const [otherInterest, setOtherInterest] = useState("");
+export function Onboarding({ onSubmit, initial, onCancel }: Props) {
+  const editing = !!initial;
+  const [tab, setTab] = useState<Tab>(editing ? "interest" : "age");
+  const [age, setAge] = useState<string>(initial?.age ?? "");
+  const [interests, setInterests] = useState<string[]>(initial?.interests ?? []);
+  const [customTopic, setCustomTopic] = useState(initial?.customTopic ?? "");
+  const [otherInterest, setOtherInterest] = useState(initial?.otherInterest ?? "");
+
+  function submit() {
+    onSubmit({
+      age,
+      interests,
+      otherInterest: otherInterest.trim() || undefined,
+      customTopic: customTopic.trim() || undefined,
+    });
+  }
 
   function toggleInterest(id: string) {
     setInterests((prev) =>
@@ -29,13 +43,7 @@ export function Onboarding({ onSubmit }: Props) {
   function next() {
     if (tab === "age") setTab("interest");
     else if (tab === "interest") setTab("custom");
-    else
-      onSubmit({
-        age,
-        interests,
-        otherInterest: otherInterest.trim() || undefined,
-        customTopic: customTopic.trim() || undefined,
-      });
+    else submit();
   }
 
   function back() {
@@ -56,9 +64,11 @@ export function Onboarding({ onSubmit }: Props) {
           <div className="flex items-center gap-3">
             <span className="text-3xl">🌱</span>
             <div>
-              <h1 className="text-xl font-bold">探究伴走ノートへようこそ</h1>
+              <h1 className="text-xl font-bold">{editing ? "興味分野・テーマの変更" : "探究伴走ノートへようこそ"}</h1>
               <p className="text-sm text-brand-50/90 mt-0.5">
-                最初に少しだけ、あなたのことを教えて
+                {editing
+                  ? "変更すると、ステップ 1 の話題カードや情報ハブの候補に反映されます。書いた記録は消えません。"
+                  : "はじめに、あなたのことを少し教えてください。"}
               </p>
             </div>
           </div>
@@ -105,10 +115,10 @@ export function Onboarding({ onSubmit }: Props) {
           {tab === "age" && (
             <div>
               <h2 className="text-base font-semibold text-stone-800 mb-1">
-                あなたの年齢層は？
+                あなたの年齢層を選んでください
               </h2>
               <p className="text-sm text-stone-500 mb-4">
-                探究記録に残すために使うよ
+                探究の記録に残すために使います。
               </p>
               <div className="grid grid-cols-2 gap-2">
                 {AGE_OPTIONS.map((a) => (
@@ -131,10 +141,10 @@ export function Onboarding({ onSubmit }: Props) {
           {tab === "interest" && (
             <div>
               <h2 className="text-base font-semibold text-stone-800 mb-1">
-                ざっくり興味のある分野は？
+                興味のある分野を選んでください
               </h2>
               <p className="text-sm text-stone-500 mb-4">
-                複数選んで OK。ステップ 1 の話題カードに使うよ
+                複数選べます。ステップ 1 の話題カードに使います。
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {INTEREST_CATEGORIES.map((c) => {
@@ -162,7 +172,7 @@ export function Onboarding({ onSubmit }: Props) {
                 ほかに興味のある分野 (自由記述・任意)
               </label>
               <p className="mt-0.5 text-xs text-stone-500">
-                上の選択肢にない分野や、もっと細かい興味があれば書いてね。
+                上の選択肢にない分野や、もっと細かい興味があれば書いてください。
               </p>
               <input
                 id="other-interest"
@@ -177,10 +187,10 @@ export function Onboarding({ onSubmit }: Props) {
           {tab === "custom" && (
             <div>
               <h2 className="text-base font-semibold text-stone-800 mb-1">
-                すでに「これが気になる」テーマがあれば書いてね
+                すでに「これが気になる」というテーマがあれば書いてください
               </h2>
               <p className="text-sm text-stone-500 mb-4">
-                空欄でも大丈夫。そのときは興味分野の話題カードから考えよう。
+                空欄でもかまいません。その場合は、興味分野の話題カードから考えましょう。
               </p>
               <textarea
                 value={customTopic}
@@ -190,30 +200,44 @@ export function Onboarding({ onSubmit }: Props) {
                 className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200"
               />
               <p className="mt-3 text-xs text-stone-500">
-                ※ 入力した内容はどこにも送信されません
-                (ブラウザの localStorage には保存されます)。
+                ※ 入力した内容はこの端末に保存されます。ログインしている場合は、担当の先生にも共有されます。
               </p>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between border-t border-stone-200 bg-stone-50 px-6 py-3">
-          <button
-            onClick={back}
-            disabled={tab === "age"}
-            className="rounded-md px-4 py-2 text-sm text-stone-600 hover:bg-stone-200 disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            戻る
-          </button>
-          <button
-            onClick={next}
-            disabled={!canNext}
-            className="rounded-md bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:bg-stone-300 disabled:cursor-not-allowed"
-          >
-            {tab === "custom" ? "✨ 始める" : "次へ →"}
-          </button>
-        </div>
+        {editing ? (
+          <div className="flex items-center justify-between border-t border-stone-200 bg-stone-50 px-6 py-3">
+            <button onClick={onCancel} className="rounded-md px-4 py-2 text-sm text-stone-600 hover:bg-stone-200">
+              変更せずに戻る
+            </button>
+            <button
+              onClick={submit}
+              disabled={!age || (interests.length === 0 && !otherInterest.trim())}
+              className="rounded-md bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:bg-stone-300 disabled:cursor-not-allowed"
+            >
+              保存する
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between border-t border-stone-200 bg-stone-50 px-6 py-3">
+            <button
+              onClick={back}
+              disabled={tab === "age"}
+              className="rounded-md px-4 py-2 text-sm text-stone-600 hover:bg-stone-200 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              戻る
+            </button>
+            <button
+              onClick={next}
+              disabled={!canNext}
+              className="rounded-md bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:bg-stone-300 disabled:cursor-not-allowed"
+            >
+              {tab === "custom" ? "✨ 始める" : "次へ →"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
