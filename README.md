@@ -32,6 +32,64 @@
 回答はすべて **その端末のブラウザ (localStorage) の中だけ** に保存され、外部には送信されません。
 端末を変えるときは画面の「バックアップ保存 / 読み込み」(JSON ファイル) を使います。
 
+## ログインと先生の進捗管理
+
+| | 生徒 | 先生 |
+|---|---|---|
+| ログイン | 先生が発行した **ログインコード** (`XXXX-XXXX-XXXX`、約 59 ビット) | メール + パスワード (学校の **招待コード** で登録) |
+| 画面 | `/` | `/teacher/` |
+| 見られるもの | 自分の記録 | 担当クラスの進捗表・記入内容 (他のクラス・他の学校は不可) |
+
+- 「ログインせずに使う」も残してある (端末だけに保存、先生には共有されない)
+- 記録は **端末に先に保存** し、サーバへは間隔をあけて同期 (`lib/useCloudSync.ts`)。回線が切れても書き続けられる
+- 別の端末で更新されていたら版番号で検知し、上書きせずサーバ側を採用 (端末側は `:conflict` に退避)
+- ログアウトすると送信済みの記録を端末から消す (共用 PC で次の生徒に見えない)
+- Cloudflare 側の一時的な失敗 (JSON でない 404/429/5xx・通信エラー) はクライアントが自動で再試行 (`lib/api.ts`)
+- データの取り扱いの説明: `/privacy/` (下書き。導入校の方針に合わせて確認すること)
+
+### 構成
+
+```
+functions/api/student/{login,logout,state}.ts      生徒 API
+functions/api/teacher/{register,login,logout,me,classes,students,progress,student}.ts  先生 API
+functions/api/_middleware.ts                       Origin 検査 (CSRF)・エラー処理
+functions/_lib/                                    暗号・セッション・権限・進捗の要約
+migrations/0001_init.sql                           D1 スキーマ
+scripts/admin.mjs                                  運営者 CLI
+```
+
+### 運営者の作業 (学校を追加する)
+
+```bash
+node scripts/admin.mjs create-school "○○高等学校"     # 招待コードが 1 回だけ表示される → 学校に伝える
+node scripts/admin.mjs list-schools
+node scripts/admin.mjs reissue-invite <school_id>       # 招待コードの再発行 (登録済みの先生には影響なし)
+node scripts/admin.mjs disable-school <school_id>       # 契約終了時など。その学校の先生・生徒はログイン不可
+```
+
+`--local` を付けると `wrangler pages dev` 用のローカル DB を操作する。
+スキーマを変えたら `wrangler d1 migrations apply tankyu-note-db --remote`。
+
+### 無料版の上限と、有料版 (Workers Paid、月 $5) への切り替え
+
+無料版の上限: Workers 10 万リクエスト/日、D1 書き込み 10 万行/日、CPU 10ms/リクエスト。
+
+| 1 クラス (50 分・250 人) の目安 | 回数 |
+|---|---|
+| ログイン | 約 250 リクエスト / 約 750 行書き込み |
+| 同期 (60 秒ごと、書いている間だけ) | 最大 約 12,500 リクエスト / 同数の行書き込み |
+| 先生の進捗表 (60 秒ごと) | 約 50 リクエスト |
+
+→ **無料版で 1 日あたり約 7 コマ (250 人規模)** まで。上限を超えると、その日はサーバへの同期が止まる (端末への保存は続く)。
+また、無料版は CPU 上限のため一斉アクセス時にまれ (実測 0〜2%) に Cloudflare 側で失敗するが、自動再試行で吸収している。
+
+有料版に切り替えたら、次の 2 点を変えて `npm run deploy`:
+
+1. `wrangler.toml` の `PBKDF2_ITERATIONS` を `"600000"` に (既存の先生は次回ログイン時に自動で強いハッシュに置き換わる)
+2. ビルド時の同期間隔を短く: `NEXT_PUBLIC_SYNC_INTERVAL_SEC=15 npm run deploy`
+
+負荷試験 (2026-11-04、無料版、プレビュー環境): 250 人 (50 人 × 5 クラス) が同時に ログイン → 記録取得 → 同期 を 3 回 = 2,250 リクエストですべて成功。ログイン p95 約 2 秒、同期 p95 約 1 秒。
+
 ## 一斉アクセス (150〜250 人) への備え
 
 負荷試験 (2026-11-04、同一 IP から 1 人 = 接続 1 本で HTML + CSS を取得):
@@ -83,8 +141,9 @@ npm run deploy   # ビルド → Cloudflare Pages へ直接アップロード (G
 - 静的ファイルへのリクエスト・転送量は無料で無制限
 - `public/_headers` でキャッシュ (ハッシュ付きファイルは 1 年、HTML は毎回確認) を設定
 
-### 予備: GitHub Pages
-`main` に push すると `.github/workflows/pages.yml` が https://habatch.github.io/inquiry-buddy-lite/ にも配信する。
+### 予備: GitHub Pages (自動デプロイ停止中)
+https://habatch.github.io/inquiry-buddy-lite/ はログイン機能を入れる前の版のまま (API が動かないため)。
+`.github/workflows/pages.yml` は手動実行のみ。
 GitHub Pages は同一 IP からの大量アクセスで HTTP 429 (約 5 分ブロック) になるため、学校への案内には使わない。
 
 ## 内容を編集する

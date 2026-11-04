@@ -1,0 +1,18 @@
+# Cloudflare Pages (静的サイト + Pages Functions) の設定
+name = "tankyu-note"
+pages_build_output_dir = "out"
+compatibility_date = "2026-10-15"
+
+[vars]
+# 教員パスワードの PBKDF2 反復回数。無料版は CPU 10ms/リクエスト制限があるため控えめ。
+# 有料版 (Workers Paid) に切り替えたら 600000 に上げる。既存の教員は次回ログイン時に自動で再ハッシュされる。
+PBKDF2_ITERATIONS = "50000"
+# 生徒のログイン有効期間 (日)
+STUDENT_SESSION_DAYS = "14"
+TEACHER_SESSION_DAYS = "7"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tankyu-note-db"
+database_id = "e6c27c9e-c729-4570-b37e-32ddd458f221"
+migrations_dir = "migrations"
