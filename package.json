@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build && node scripts/inline-assets.mjs",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "deploy": "npm run build && wrangler pages deploy out --project-name tankyu-note --branch main --commit-dirty=true"
   },
   "dependencies": {
     "docx": "^9.6.1",
@@ -21,7 +22,8 @@
     "autoprefixer": "^10.4.19",
     "postcss": "^8.4.39",
     "tailwindcss": "^3.4.4",
-    "typescript": "^5.5.3"
+    "typescript": "^5.5.3",
+    "wrangler": "4.151.3"
   },
   "engines": {
     "node": ">=18"
