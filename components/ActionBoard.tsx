@@ -42,6 +42,7 @@ export function makeActionFromKit(kit: ActionKit, vars: Record<string, string>, 
     memo: kit.template ? fillTemplate(kit.template, vars) : "",
     learned: "",
     step,
+    kitId: kit.id,
     createdAt: Date.now(),
   };
 }
@@ -147,7 +148,7 @@ function ActionCard({
                 }}
                 className="mt-1 rounded-md bg-stone-100 px-2.5 py-1 text-xs text-stone-700 hover:bg-stone-200"
               >
-                {copied ? "✓ コピーした" : "📋 下書きをコピー"}
+                {copied ? "✓ コピーしました" : "📋 下書きをコピー"}
               </button>
             )}
           </div>
@@ -164,13 +165,13 @@ function ActionCard({
             value={a.learned}
             onChange={(e) => onUpdate({ learned: e.target.value })}
             rows={3}
-            placeholder="予想と同じだった？違った？ 新しく生まれた疑問は？"
+            placeholder="予想と同じでしたか？ 違いましたか？ 新しく生まれた疑問はありますか？"
             className={`${input} mt-1`}
           />
           <p className="mt-1 text-xs text-stone-400">
             {learnedLen < LEARNED_MIN_CHARS
-              ? `あと ${LEARNED_MIN_CHARS - learnedLen} 字書くとポイントが入るよ`
-              : "振り返りが書けた！"}
+              ? `あと ${LEARNED_MIN_CHARS - learnedLen} 字書くとポイントが入ります`
+              : "振り返りが書けました"}
           </p>
         </div>
       )}
@@ -227,7 +228,7 @@ export function KitCard({
           )}
           {preview && (
             <div>
-              <p className="font-semibold text-stone-600">下書きテンプレート (あなたの問い・仮説が入るよ)</p>
+              <p className="font-semibold text-stone-600">下書きテンプレート (あなたの問い・仮説が入っています)</p>
               <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-stone-50 p-2.5 font-sans leading-relaxed text-stone-700">
                 {preview}
               </pre>
@@ -242,7 +243,7 @@ export function KitCard({
               }}
               className="rounded-md bg-brand-600 px-3 py-1.5 font-semibold text-white hover:bg-brand-700"
             >
-              {added ? "✓ 行動ボードに追加した" : "＋ 行動ボードに追加"}
+              {added ? "✓ 行動ボードに追加しました" : "＋ 行動ボードに追加"}
             </button>
             {kit.links?.map((l) => (
               <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer" className={linkBtn}>
@@ -311,8 +312,8 @@ export function ActionBoard({
           <h2 className="text-xl font-bold text-stone-800">行動ボード</h2>
         </div>
         <p className="mt-3 rounded-xl bg-brand-50 px-4 py-3 text-sm leading-relaxed text-brand-900">
-          探究は「考える」だけじゃなく「動く」ことで進むよ。調べる・聞く・行く・試す・作る・発信する——やってみたいことを自由に書いて、やったら振り返りを残そう。
-          「できた」にして振り返りを書くと +{SCORE_ACTION_DONE} pt + 書いた量に応じてボーナス (最大 {ACTION_SCORE_LIMIT} 件まで)。
+          探究は「考える」だけでなく「動く」ことで進みます。調べる・聞く・行く・試す・作る・発信するなど、やってみたいことを自由に書き、終わったら振り返りを残してください。
+          「できた」にして振り返りを書くと、+{SCORE_ACTION_DONE} pt と書いた量に応じたボーナスが入ります (最大 {ACTION_SCORE_LIMIT} 件まで)。
         </p>
       </div>
 
@@ -379,7 +380,7 @@ export function ActionBoard({
         <div className="mt-3 space-y-3">
           {shown.length === 0 ? (
             <p className="rounded-xl border border-dashed border-stone-300 bg-white px-4 py-6 text-center text-sm text-stone-500">
-              {actions.length === 0 ? "まだ行動がないよ。上に書くか、下の「行動キット」から選んでみよう。" : "この状態の行動はないよ。"}
+              {actions.length === 0 ? "まだ行動がありません。上に書くか、下の「行動キット」から選んでください。" : "この状態の行動はありません。"}
             </p>
           ) : (
             shown.map((a) => <ActionCard key={a.id} a={a} onUpdate={(p) => update(a.id, p)} onDelete={() => remove(a.id)} />)
@@ -396,7 +397,7 @@ export function ActionBoard({
           </button>
         </div>
         <p className="mt-1 text-xs text-stone-500">
-          よくある行動の手順と下書きテンプレート。ステップで書いた問いや仮説が自動で入るので、直して使おう。
+          よくある行動の手順と下書きテンプレートです。ステップで書いた問いや仮説が自動で入るので、直して使ってください。
         </p>
         <div className="mt-3 flex flex-wrap gap-1.5">
           {([{ id: "all", label: "すべて", icon: "✳️" }, ...ACTION_KINDS] as { id: ActionKind | "all"; label: string; icon: string }[]).map((k) => (

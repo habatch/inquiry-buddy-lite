@@ -27,7 +27,7 @@ export function LoginScreen({ onStudent, onGuest, relogin, onCancel }: Props) {
     try {
       const r = await api<{ student: StudentInfo }>("/student/login", { method: "POST", json: { code } });
       if (relogin && r.student.id !== relogin.id) {
-        setError("別の生徒のコードです。自分のカードのコードを入れてね。");
+        setError("別の生徒のコードです。自分のカードのコードを入力してください。");
         return;
       }
       onStudent(r.student);
@@ -47,7 +47,7 @@ export function LoginScreen({ onStudent, onGuest, relogin, onCancel }: Props) {
             <div>
               <h1 className="text-xl font-bold">探究伴走ノート</h1>
               <p className="mt-0.5 text-sm text-brand-50/90">
-                {relogin ? "ログインの期限が切れました。もう一度コードを入れてね" : "先生からもらったログインコードを入れてね"}
+                {relogin ? "ログインの期限が切れました。もう一度コードを入力してください。" : "先生からもらったログインコードを入れてね"}
               </p>
             </div>
           </div>
@@ -70,7 +70,7 @@ export function LoginScreen({ onStudent, onGuest, relogin, onCancel }: Props) {
               inputMode="text"
               className="mt-2 w-full rounded-lg border-2 border-stone-300 px-4 py-3 text-center font-mono text-xl tracking-widest focus:border-brand-500 focus:outline-none"
             />
-            <p className="mt-1.5 text-xs text-stone-500">ハイフンは自動で入るよ。小文字で打っても大丈夫。</p>
+            <p className="mt-1.5 text-xs text-stone-500">ハイフンは自動で入ります。小文字で入力してもかまいません。</p>
           </div>
           {error && <p className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
           <button

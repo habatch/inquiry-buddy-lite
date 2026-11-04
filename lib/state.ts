@@ -128,6 +128,7 @@ function parseAction(x: unknown): Action | null {
     memo: typeof a.memo === "string" ? a.memo : "",
     learned: typeof a.learned === "string" ? a.learned : "",
     step: typeof a.step === "number" ? a.step : undefined,
+    kitId: typeof a.kitId === "string" ? a.kitId : undefined,
     createdAt: typeof a.createdAt === "number" ? a.createdAt : Date.now(),
   };
 }

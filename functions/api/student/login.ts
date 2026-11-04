@@ -26,7 +26,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
 
   if (!st) {
     await recordFailure(env, ipKey, WINDOW);
-    return fail(401, "ログインコードが違います。カードをもう一度確認してね。");
+    return fail(401, "ログインコードが違います。カードをもう一度確認してください。");
   }
   if (st.archived || !st.active) return fail(403, "このクラスは現在使えません。先生に確認してください。");
 

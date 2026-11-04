@@ -51,10 +51,12 @@ import {
 import { LoginScreen } from "@/components/LoginScreen";
 import { useCloudSync, type CloudStatus } from "@/lib/useCloudSync";
 import { api } from "@/lib/api";
-import { ActionBoard, KitCard, makeActionFromKit } from "@/components/ActionBoard";
+import { ActionBoard, makeActionFromKit } from "@/components/ActionBoard";
+import { StepActions } from "@/components/StepActions";
 import { InfoHub } from "@/components/InfoHub";
-import { ACTION_KITS, kindMeta, STATUS_META, type Action } from "@/lib/actions";
+import { type Action } from "@/lib/actions";
 import { themeTerms } from "@/lib/relevance";
+import { INTEREST_CATEGORIES } from "@/lib/topics";
 
 type View = "steps" | "actions" | "info";
 
@@ -218,7 +220,7 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
         lastWrittenRef.current = e.newValue;
         prevRankRef.current = getCurrentRank(computeScore(parsed));
         setSt(parsed);
-        setNotice("別のタブで書いた内容を反映しました。同じ記録を 2 つのタブで開くのは避けよう。");
+        setNotice("別のタブで書いた内容を反映しました。同じ記録を 2 つのタブで開くのは避けてください。");
       } catch {
         /* ignore */
       }
@@ -249,6 +251,7 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
     notify: setNotice,
   });
   const [relogin, setRelogin] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
 
   async function signOut() {
     if (student) {
@@ -345,7 +348,7 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
       setNotice(
         "Word 保存でエラー: " +
           (e instanceof Error ? e.message : String(e)) +
-          "\n回線が混んでいるときは、少し待ってからもう一度押してみてね。",
+          "\n回線が混んでいるときは、少し待ってからもう一度押してください。",
       );
     } finally {
       setExporting(false);
@@ -362,6 +365,20 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
 
   if (!st.profile) {
     return <Onboarding onSubmit={(p) => setSt((s) => ({ ...s, profile: p }))} />;
+  }
+
+  if (editingProfile) {
+    return (
+      <Onboarding
+        initial={st.profile}
+        onCancel={() => setEditingProfile(false)}
+        onSubmit={(p) => {
+          setSt((s) => ({ ...s, profile: p }));
+          setEditingProfile(false);
+          setNotice("興味分野・テーマを変更しました。");
+        }}
+      />
+    );
   }
 
   const step = getStep(st.step);
@@ -387,8 +404,6 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
         .filter((x) => x.length >= 2),
     ),
   ).slice(0, 5);
-  const stepKits = ACTION_KITS.filter((k) => k.steps.includes(step.id)).slice(0, 3);
-  const stepActions = st.actions.filter((a) => a.step === step.id);
   const openActions = st.actions.filter((a) => a.status !== "done").length;
   const tabs: { id: View; label: string }[] = [
     { id: "steps", label: `📘 ステップ ${step.id}` },
@@ -396,16 +411,31 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
     { id: "info", label: "🔎 情報ハブ" },
   ];
 
+  const interestLabels = [
+    ...st.profile.interests.map((id) => INTEREST_CATEGORIES.find((c) => c.id === id)?.label).filter(Boolean),
+    ...(st.profile.otherInterest ? [st.profile.otherInterest] : []),
+  ].join("・");
   const sidebarExtras = (
     <>
+      <div className="rounded-lg border border-stone-200 p-3 text-xs leading-relaxed text-stone-600">
+        <p className="font-semibold text-stone-700">🧭 興味分野・テーマ</p>
+        <p className="mt-1">{interestLabels || "未設定"}</p>
+        {st.profile.customTopic && <p className="mt-1 text-stone-500">テーマ: {st.profile.customTopic}</p>}
+        <button
+          onClick={() => setEditingProfile(true)}
+          className="mt-2 w-full rounded-md bg-stone-100 px-2 py-1.5 text-stone-700 hover:bg-stone-200"
+        >
+          ✏️ 変更する
+        </button>
+      </div>
       <div className="rounded-lg bg-stone-50 p-3 text-xs text-stone-600 leading-relaxed">
         <p className="mb-2 font-semibold text-stone-700">スコアのしくみ</p>
         <ul className="list-disc pl-4 space-y-1">
-          <li>くわしく書くほどスコアが入る (1 つの欄で最大 28 pt)</li>
-          <li>記入とチェックがそろうと +{SCORE_NEXT_READY} pt</li>
-          <li>次のステップへ進むと +{SCORE_STEP_TRANSITION} pt</li>
-          <li>行動ボードで「できた」+ 振り返りで +10 pt〜</li>
-          <li>700 pt で朱雀ステップ、800 pt で麒麟ステップが解放</li>
+          <li>くわしく書くほどスコアが入ります (1 つの欄で最大 28 pt)</li>
+          <li>記入とチェックがそろうと +{SCORE_NEXT_READY} pt です</li>
+          <li>次のステップへ進むと +{SCORE_STEP_TRANSITION} pt です</li>
+          <li>行動ボードで「できた」にして振り返りを書くと +10 pt〜 です</li>
+          <li>700 pt で朱雀ステップ、800 pt で麒麟ステップが解放されます</li>
         </ul>
       </div>
       <button
@@ -418,7 +448,9 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
       <div className="rounded-lg border border-stone-200 p-3 text-xs text-stone-600 leading-relaxed">
         <p className="font-semibold text-stone-700">💾 記録の保存場所</p>
         <p className="mt-1">
-          記録はこの端末のブラウザの中だけに保存され、どこにも送信されません。別の端末で続けるときや、ブラウザのデータを消す前は、バックアップを保存しておこう。
+          {student
+            ? "記録はこの端末に保存され、担当の先生にも共有されます。別の端末でも、同じログインコードで続きから使えます。"
+            : "記録はこの端末のブラウザの中だけに保存され、どこにも送信されません。別の端末で続けるときや、ブラウザのデータを消す前は、バックアップを保存してください。"}
         </p>
         <p className="mt-1.5 text-stone-500">最後のバックアップ: {formatAgo(backupAt)}</p>
         <div className="mt-2 flex gap-2">
@@ -467,7 +499,7 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
           <span className="text-2xl">🌱</span>
           <div className="min-w-0">
             <h1 className="text-lg font-bold text-stone-800">探究伴走ノート</h1>
-            <p className="truncate text-xs text-stone-500">答えは書いていない。自分で考えるための探究ワークブック</p>
+            <p className="truncate text-xs text-stone-500">答えは書かれていません。自分で考えるための探究ワークブックです</p>
           </div>
         </div>
         <div className="ml-auto flex shrink-0 flex-col items-end gap-0.5 sm:flex-row sm:items-center sm:gap-2">
@@ -575,7 +607,7 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
               <div className="rounded-md border-2 border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                 <p className="font-bold">🔑 ログインの期限が切れました</p>
                 <p className="mt-1 text-xs leading-relaxed">
-                  書いた内容はこの端末に保存されています。先生に記録を届けるには、もう一度ログインコードを入れてね。
+                  書いた内容はこの端末に保存されています。先生に記録を届けるには、もう一度ログインコードを入力してください。
                 </p>
                 <button onClick={() => setRelogin(true)} className="mt-2 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700">
                   もう一度ログイン
@@ -656,6 +688,7 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
                 interests={st.profile.interests}
                 otherInterest={st.profile.otherInterest}
                 customTopic={st.profile.customTopic}
+                onEditProfile={() => setEditingProfile(true)}
               />
             )}
             {step.widget === "search" && <SearchWidget keywords={ans(answerKey(4, "keywords"))} />}
@@ -681,37 +714,14 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
             ))}
 
             {/* このステップで起こせる行動 */}
-            <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-sky-900">🚀 このステップで起こせる行動</h3>
-                <div className="flex gap-3 text-xs font-medium">
-                  <button onClick={() => goView("info")} className="text-sky-800 hover:underline">🔎 情報ハブで調べる</button>
-                  <button onClick={() => goView("actions")} className="text-sky-800 hover:underline">行動ボードへ →</button>
-                </div>
-              </div>
-              <p className="mt-1 text-xs text-sky-900/80">書くだけで止まらず、実際に動いてみよう。下書き付きのキットを行動ボードに追加できるよ。</p>
-              {stepActions.length > 0 && (
-                <ul className="mt-3 space-y-1">
-                  {stepActions.map((a) => (
-                    <li key={a.id} className="flex items-center gap-2 text-xs text-stone-700">
-                      <span>{kindMeta(a.kind).icon}</span>
-                      <span className="flex-1 truncate">{a.title}</span>
-                      <span className={`rounded px-1.5 py-0.5 ${STATUS_META[a.status].color}`}>{STATUS_META[a.status].label}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <div className="mt-3 grid gap-2">
-                {stepKits.map((kit) => (
-                  <KitCard
-                    key={kit.id}
-                    kit={kit}
-                    vars={vars}
-                    onAdd={() => setActions((prev) => [makeActionFromKit(kit, vars, step.id), ...prev])}
-                  />
-                ))}
-              </div>
-            </div>
+            <StepActions
+              step={step.id}
+              actions={st.actions}
+              vars={vars}
+              onAdd={(kit) => setActions((prev) => [makeActionFromKit(kit, vars, step.id), ...prev])}
+              onOpenBoard={() => goView("actions")}
+              onOpenInfo={() => goView("info")}
+            />
 
             {/* Checklist */}
             <div className={`rounded-xl border-2 bg-white p-4 shadow-sm ${status.ready ? "border-brand-400" : "border-dashed border-stone-300"}`}>
@@ -722,7 +732,7 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
                 </span>
               </div>
               <p className="mt-1 text-xs text-stone-500">
-                書いた内容を読み返して、当てはまったらチェックしよう。全部そろうと +{SCORE_NEXT_READY} pt。
+                書いた内容を読み返して、当てはまるものにチェックを入れてください。全部そろうと +{SCORE_NEXT_READY} pt です。
               </p>
               <ul className="mt-3 space-y-2">
                 {step.checklist.map((c, i) => (
@@ -746,7 +756,7 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
               <div className="relative overflow-hidden rounded-xl bg-gradient-to-r from-amber-300 via-emerald-400 to-emerald-600 px-5 py-4 shadow-lg animate-banner-glow">
                 <div className="relative flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center">
                   <div className="text-white">
-                    <p className="text-xs font-semibold tracking-widest opacity-90">✨ 記入もチェックもそろったよ</p>
+                    <p className="text-xs font-semibold tracking-widest opacity-90">✨ 記入もチェックもそろいました</p>
                     <p className="mt-0.5 text-lg font-bold leading-tight">「{step.name}」達成！次は「{nextStep.name}」</p>
                   </div>
                   <button
@@ -768,15 +778,15 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
               <div className="rounded-xl bg-gradient-to-r from-orange-400 to-pink-500 px-5 py-4 text-white shadow-lg">
                 <p className="text-lg font-bold">🎉 「{step.name}」達成！</p>
                 <p className="mt-1 text-sm opacity-95">
-                  探究の基本ステップはここまで。Word で保存して発表に使おう。あと {nextStep.unlockScore! - score} pt
-                  で「{nextStep.name}」が解放されるよ。前のステップの答えをくわしく書き足すとスコアが増えるよ。
+                  探究の基本ステップはここまでです。Word で保存して発表に使ってください。あと {nextStep.unlockScore! - score} pt
+                  で「{nextStep.name}」が解放されます。前のステップの答えをくわしく書き足すと、スコアが増えます。
                 </p>
               </div>
             )}
             {status.ready && !nextStep && (
               <div className="rounded-xl bg-gradient-to-r from-purple-400 via-fuchsia-500 to-pink-500 px-5 py-4 text-center text-white shadow-lg">
                 <p className="text-2xl font-bold">🎉 探究の最終ステップ、完走！</p>
-                <p className="mt-1 text-sm opacity-90">記録を Word で保存して、「最初の一歩」を踏み出そう。お疲れさま！</p>
+                <p className="mt-1 text-sm opacity-90">記録を Word で保存して、「最初の一歩」を踏み出してください。お疲れさまでした。</p>
               </div>
             )}
 
