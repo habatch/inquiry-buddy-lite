@@ -61,6 +61,16 @@ export async function downloadDocx(st: AppState, score: number, rankName: string
         children: [new TextRun({ text: "興味分野: ", bold: true }), new TextRun(interests)],
       }),
     );
+    if (p.otherInterest) {
+      out.push(
+        new Paragraph({
+          children: [
+            new TextRun({ text: "ほかの興味: ", bold: true }),
+            new TextRun(p.otherInterest),
+          ],
+        }),
+      );
+    }
     if (p.customTopic) {
       out.push(
         new Paragraph({

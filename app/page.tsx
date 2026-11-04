@@ -305,7 +305,11 @@ export default function Home() {
 
             {/* Widgets */}
             {step.widget === "topics" && (
-              <TopicsWidget interests={st.profile.interests} customTopic={st.profile.customTopic} />
+              <TopicsWidget
+                interests={st.profile.interests}
+                otherInterest={st.profile.otherInterest}
+                customTopic={st.profile.customTopic}
+              />
             )}
             {step.widget === "search" && <SearchWidget keywords={ans(answerKey(4, "keywords"))} />}
             {step.widget === "outreach" && <OutreachWidget />}

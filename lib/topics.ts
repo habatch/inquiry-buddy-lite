@@ -75,6 +75,7 @@ export const AGE_OPTIONS = [
 export interface UserProfile {
   age: string;
   interests: string[]; // category id の配列
+  otherInterest?: string; // 選択肢にない興味分野 (自由記述)
   customTopic?: string; // 「ここに書いてみる」の任意入力
 }
 

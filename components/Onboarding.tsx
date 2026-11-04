@@ -18,6 +18,7 @@ export function Onboarding({ onSubmit }: Props) {
   const [age, setAge] = useState<string>("");
   const [interests, setInterests] = useState<string[]>([]);
   const [customTopic, setCustomTopic] = useState("");
+  const [otherInterest, setOtherInterest] = useState("");
 
   function toggleInterest(id: string) {
     setInterests((prev) =>
@@ -32,6 +33,7 @@ export function Onboarding({ onSubmit }: Props) {
       onSubmit({
         age,
         interests,
+        otherInterest: otherInterest.trim() || undefined,
         customTopic: customTopic.trim() || undefined,
       });
   }
@@ -43,7 +45,7 @@ export function Onboarding({ onSubmit }: Props) {
 
   const canNext =
     (tab === "age" && age) ||
-    (tab === "interest" && interests.length > 0) ||
+    (tab === "interest" && (interests.length > 0 || otherInterest.trim().length > 0)) ||
     tab === "custom";
 
   return (
@@ -70,7 +72,7 @@ export function Onboarding({ onSubmit }: Props) {
               {
                 id: "interest" as Tab,
                 label: "2. 興味分野",
-                filled: interests.length > 0,
+                filled: interests.length > 0 || !!otherInterest.trim(),
               },
               { id: "custom" as Tab, label: "3. 自由記述 (任意)", filled: !!customTopic },
             ]
@@ -153,6 +155,22 @@ export function Onboarding({ onSubmit }: Props) {
                   );
                 })}
               </div>
+              <label
+                htmlFor="other-interest"
+                className="mt-4 block text-sm font-semibold text-stone-800"
+              >
+                ほかに興味のある分野 (自由記述・任意)
+              </label>
+              <p className="mt-0.5 text-xs text-stone-500">
+                上の選択肢にない分野や、もっと細かい興味があれば書いてね。
+              </p>
+              <input
+                id="other-interest"
+                value={otherInterest}
+                onChange={(e) => setOtherInterest(e.target.value)}
+                placeholder="例: 鉄道 / 天文 / 福祉 / ゲーム / 方言 など"
+                className="mt-2 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200"
+              />
             </div>
           )}
 

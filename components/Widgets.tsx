@@ -11,9 +11,11 @@ const linkBtn =
 /** Step 1: 話題カード */
 export function TopicsWidget({
   interests,
+  otherInterest,
   customTopic,
 }: {
   interests: string[];
+  otherInterest?: string;
   customTopic?: string;
 }) {
   const topics = topicsForInterests(interests);
@@ -23,6 +25,19 @@ export function TopicsWidget({
       <p className="mt-1 text-xs text-stone-500">
         読んでみて「これ気になる」「これは別に」と感じるだけで OK。🔎 から最新のニュースを探せるよ。
       </p>
+      {otherInterest && (
+        <p className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-900">
+          ほかに興味がある分野: <span className="font-semibold">{otherInterest}</span>
+          <a
+            href={newsSearchUrl(otherInterest)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`${linkBtn} ml-2`}
+          >
+            🔎 この分野のニュースを探す
+          </a>
+        </p>
+      )}
       {customTopic && (
         <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
           最初に書いてくれたテーマ: <span className="font-semibold">{customTopic}</span>
