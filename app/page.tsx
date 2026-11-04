@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Onboarding } from "@/components/Onboarding";
 import { RankBadge, RankUpToast } from "@/components/RankBadge";
 import { StepSidebar } from "@/components/StepSidebar";
@@ -23,7 +23,6 @@ import {
 } from "@/lib/ranks";
 import {
   EMPTY_STATE,
-  STORAGE_KEY,
   answerKey,
   checkKey,
   computeScore,
@@ -34,14 +33,24 @@ import {
 import { saveBlob } from "@/lib/file";
 import {
   formatAgo,
+  getAuthHint,
   getBackupAt,
+  getSyncMeta,
   readRaw,
   removeRaw,
   requestPersist,
+  setAuthHint,
   setBackupAt,
+  setSyncMeta,
+  stateKey,
   storageWritable,
   writeRaw,
+  type AuthHint,
+  type StudentInfo,
 } from "@/lib/storage";
+import { LoginScreen } from "@/components/LoginScreen";
+import { useCloudSync, type CloudStatus } from "@/lib/useCloudSync";
+import { api } from "@/lib/api";
 import { ActionBoard, KitCard, makeActionFromKit } from "@/components/ActionBoard";
 import { InfoHub } from "@/components/InfoHub";
 import { ACTION_KITS, kindMeta, STATUS_META, type Action } from "@/lib/actions";
@@ -51,7 +60,74 @@ type View = "steps" | "actions" | "info";
 
 const rankIndex = (r: Rank) => RANKS.findIndex((x) => x.id === r.id);
 
-export default function Home() {
+// ------------------------------------------------------------------
+// 入口: ログイン状態で「誰のノートを開くか」を決める
+// ------------------------------------------------------------------
+export default function Page() {
+  const [auth, setAuth] = useState<AuthHint | null | undefined>(undefined);
+  useEffect(() => setAuth(getAuthHint()), []);
+
+  if (auth === undefined) {
+    return (
+      <main className="flex h-screen items-center justify-center bg-stone-50">
+        <div className="text-stone-400">読み込み中…</div>
+      </main>
+    );
+  }
+
+  if (auth === null) {
+    return (
+      <LoginScreen
+        onGuest={() => {
+          const h: AuthHint = { mode: "guest" };
+          setAuthHint(h);
+          setAuth(h);
+        }}
+        onStudent={(student) => {
+          carryOverGuestData(student);
+          const h: AuthHint = { mode: "student", student };
+          setAuthHint(h);
+          setAuth(h);
+        }}
+      />
+    );
+  }
+
+  const student = auth.mode === "student" ? auth.student : null;
+  return (
+    <Notebook
+      key={student?.id ?? "guest"}
+      student={student}
+      onSignedOut={() => {
+        setAuthHint(null);
+        setAuth(null);
+      }}
+    />
+  );
+}
+
+/** ログインせずに書いていた記録を、初めてログインした生徒の記録として引き継ぐか確認する */
+function carryOverGuestData(student: StudentInfo) {
+  const key = stateKey(student.id);
+  const guestRaw = readRaw();
+  if (!guestRaw || readRaw(key)) return;
+  try {
+    const g = parseState(JSON.parse(guestRaw));
+    const has = g && (g.profile || Object.values(g.answers).some((v) => v.trim()) || g.actions.length > 0);
+    if (!has) return;
+  } catch {
+    return;
+  }
+  if (!confirm("ログインせずにこの端末で書いた記録があります。この記録をあなたのアカウントに引き継ぎますか？\n(すでにサーバに記録がある場合は、サーバの記録が優先されます)")) return;
+  writeRaw(guestRaw, key);
+  setSyncMeta(key, { ...getSyncMeta(key), dirty: true });
+}
+
+// ------------------------------------------------------------------
+// ノート本体 (生徒 1 人ぶん、またはゲスト)
+// ------------------------------------------------------------------
+function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSignedOut: () => void }) {
+  const storeKey = stateKey(student?.id);
   const [st, setSt] = useState<AppState>(EMPTY_STATE);
   const [hydrated, setHydrated] = useState(false);
   const [rankUpToast, setRankUpToast] = useState<Rank | null>(null);
@@ -76,7 +152,7 @@ export default function Home() {
 
   // 復元
   useEffect(() => {
-    const raw = readRaw();
+    const raw = readRaw(storeKey);
     try {
       const parsed = raw ? parseState(JSON.parse(raw)) : null;
       if (parsed) {
@@ -100,7 +176,7 @@ export default function Home() {
       setSaveState((s) => (s === "pending" ? "saved" : s));
       return;
     }
-    if (writeRaw(json)) {
+    if (writeRaw(json, storeKey)) {
       lastWrittenRef.current = json;
       setSaveState("saved");
     } else {
@@ -135,7 +211,7 @@ export default function Home() {
   // 同じ端末で 2 つのタブを開いたとき、古いタブが新しい記録を上書きしないよう同期する
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
-      if (e.key !== STORAGE_KEY || !e.newValue || e.newValue === lastWrittenRef.current) return;
+      if (e.key !== storeKey || !e.newValue || e.newValue === lastWrittenRef.current) return;
       try {
         const parsed = parseState(JSON.parse(e.newValue));
         if (!parsed) return;
@@ -158,6 +234,44 @@ export default function Home() {
     if (rankIndex(rank) > rankIndex(prevRankRef.current)) setRankUpToast(rank);
     prevRankRef.current = rank;
   }, [hydrated, score]);
+
+  // サーバ同期 (ログインした生徒のみ)
+  const adopt = useCallback((s: AppState) => {
+    prevRankRef.current = getCurrentRank(computeScore(s));
+    setSt(s);
+  }, []);
+  const cloud = useCloudSync({
+    enabled: !!student,
+    storeKey,
+    hydrated,
+    st,
+    adopt,
+    notify: setNotice,
+  });
+  const [relogin, setRelogin] = useState(false);
+
+  async function signOut() {
+    if (student) {
+      flush();
+      await cloud.syncNow();
+      if (
+        cloud.isDirty() &&
+        !confirm("まだサーバに送れていない記録があります。今ログアウトすると、その分はこの端末に残ります。\nログアウトしますか？")
+      )
+        return;
+      try {
+        await api("/student/logout", { method: "POST", json: {} });
+      } catch {
+        /* オフラインでも端末側はログアウトする */
+      }
+      // 共用 PC で次の人に見えないよう、送信済みの記録は端末から消す
+      if (!cloud.isDirty()) {
+        removeRaw(storeKey);
+        removeRaw(storeKey + ":sync");
+      }
+    }
+    onSignedOut();
+  }
 
   const setAnswer = (step: number, id: string, v: string) =>
     setSt((s) => ({ ...s, answers: { ...s.answers, [answerKey(step, id)]: v } }));
@@ -194,7 +308,7 @@ export default function Home() {
       return;
     setSt(EMPTY_STATE);
     lastWrittenRef.current = null;
-    removeRaw();
+    removeRaw(storeKey);
     prevRankRef.current = RANKS[0];
   }
 
@@ -322,6 +436,19 @@ export default function Home() {
   return (
     <main className="flex h-[100dvh] flex-col bg-stone-50">
       {rankUpToast && <RankUpToast rank={rankUpToast} onDismiss={() => setRankUpToast(null)} />}
+      {relogin && student && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-900/40">
+          <LoginScreen
+            relogin={student}
+            onGuest={() => setRelogin(false)}
+            onCancel={() => setRelogin(false)}
+            onStudent={() => {
+              setRelogin(false);
+              void cloud.reconcile();
+            }}
+          />
+        </div>
+      )}
       <input
         ref={fileRef}
         type="file"
@@ -343,24 +470,54 @@ export default function Home() {
             <p className="truncate text-xs text-stone-500">答えは書いていない。自分で考えるための探究ワークブック</p>
           </div>
         </div>
-        <span
-          className={`ml-auto mr-2 shrink-0 rounded-md px-2 py-1 text-xs ${
-            saveState === "error"
-              ? "bg-rose-100 font-semibold text-rose-700"
-              : saveState === "pending"
-                ? "text-stone-400"
-                : "text-brand-700"
-          }`}
-          role="status"
-        >
-          {saveState === "error" ? "⚠ 保存できていません" : saveState === "pending" ? "保存中…" : "✓ 保存済み"}
-        </span>
-        <button
-          onClick={fullReset}
-          className="shrink-0 rounded-md bg-stone-50 px-3 py-1.5 text-xs text-stone-500 hover:bg-stone-200"
-        >
-          最初から
-        </button>
+        <div className="ml-auto flex shrink-0 flex-col items-end gap-0.5 sm:flex-row sm:items-center sm:gap-2">
+          <span
+            className={`rounded-md px-2 py-0.5 text-xs ${
+              saveState === "error"
+                ? "bg-rose-100 font-semibold text-rose-700"
+                : saveState === "pending"
+                  ? "text-stone-400"
+                  : "text-brand-700"
+            }`}
+            role="status"
+          >
+            {saveState === "error" ? "⚠ 保存できていません" : saveState === "pending" ? "保存中…" : "✓ 端末に保存済み"}
+          </span>
+          {student && <CloudBadge status={cloud.status} syncedAt={cloud.syncedAt} onSync={() => void cloud.syncNow()} />}
+        </div>
+        {student ? (
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="hidden text-right text-xs leading-tight text-stone-600 md:block">
+              {student.className}
+              <br />
+              <span className="font-semibold">
+                {student.number}番 {student.name}
+              </span>
+            </span>
+            <button
+              onClick={() => void signOut()}
+              className="rounded-md bg-stone-100 px-3 py-1.5 text-xs text-stone-700 hover:bg-stone-200"
+            >
+              ログアウト
+            </button>
+          </div>
+        ) : (
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              onClick={() => void signOut()}
+              className="rounded-md bg-brand-50 px-3 py-1.5 text-xs font-medium text-brand-800 hover:bg-brand-100"
+              title="先生からもらったコードでログイン"
+            >
+              ログイン
+            </button>
+            <button
+              onClick={fullReset}
+              className="rounded-md bg-stone-50 px-3 py-1.5 text-xs text-stone-500 hover:bg-stone-200"
+            >
+              最初から
+            </button>
+          </div>
+        )}
       </header>
 
       <nav className="flex gap-1 overflow-x-auto border-b border-stone-200 bg-white px-3 sm:px-5" aria-label="画面切り替え">
@@ -414,6 +571,17 @@ export default function Home() {
           </div>
 
           <div className="mx-auto max-w-3xl space-y-4 px-4 py-5 sm:px-6">
+            {student && cloud.status === "auth" && (
+              <div className="rounded-md border-2 border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <p className="font-bold">🔑 ログインの期限が切れました</p>
+                <p className="mt-1 text-xs leading-relaxed">
+                  書いた内容はこの端末に保存されています。先生に記録を届けるには、もう一度ログインコードを入れてね。
+                </p>
+                <button onClick={() => setRelogin(true)} className="mt-2 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700">
+                  もう一度ログイン
+                </button>
+              </div>
+            )}
             {saveState === "error" && (
               <div className="rounded-md border-2 border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-900">
                 <p className="font-bold">⚠ このブラウザでは記録が自動保存されていません</p>
@@ -620,5 +788,24 @@ export default function Home() {
         </section>
       </div>
     </main>
+  );
+}
+
+function CloudBadge({ status, syncedAt, onSync }: { status: CloudStatus; syncedAt: number | null; onSync: () => void }) {
+  const time = syncedAt ? new Date(syncedAt).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }) : null;
+  const map: Record<CloudStatus, { text: string; cls: string }> = {
+    off: { text: "", cls: "" },
+    connecting: { text: "☁ 接続中…", cls: "text-stone-400" },
+    syncing: { text: "☁ 送信中…", cls: "text-stone-400" },
+    synced: { text: `☁ 先生に共有済み${time ? ` ${time}` : ""}`, cls: "text-sky-700" },
+    pending: { text: "☁ まもなく共有", cls: "text-stone-500" },
+    offline: { text: "☁ 未共有 (通信待ち)", cls: "text-amber-700" },
+    auth: { text: "☁ 要ログイン", cls: "bg-amber-100 font-semibold text-amber-800" },
+  };
+  const m = map[status];
+  return (
+    <button onClick={onSync} className={`rounded-md px-2 py-0.5 text-xs ${m.cls}`} title="押すと今すぐ送信します">
+      {m.text}
+    </button>
   );
 }

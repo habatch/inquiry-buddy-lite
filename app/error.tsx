@@ -4,18 +4,18 @@
  * 画面の表示中に予期しないエラーが起きたときの救出画面。
  * 記録 (localStorage) はそのまま残っているので、ファイルとして書き出せるようにする。
  */
-import { readRaw } from "@/lib/storage";
+import { readAllRaw } from "@/lib/storage";
 import { saveBlob } from "@/lib/file";
 
 export default function ErrorPage({ error, reset }: { error: Error; reset: () => void }) {
   function rescue() {
-    const raw = readRaw();
-    if (!raw) {
+    const all = readAllRaw();
+    if (Object.keys(all).length === 0) {
       alert("この端末には記録が見つかりませんでした。");
       return;
     }
     saveBlob(
-      new Blob([raw], { type: "application/json" }),
+      new Blob([JSON.stringify(all, null, 2)], { type: "application/json" }),
       `探究ノート_救出_${new Date().toISOString().slice(0, 10)}.json`,
     );
   }

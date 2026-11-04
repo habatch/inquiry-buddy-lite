@@ -22,27 +22,32 @@ export function storageWritable(): boolean {
   }
 }
 
-export function readRaw(): string | null {
+/** ログイン中の生徒ごとに保存場所を分ける (共用 PC で他の生徒の記録が混ざらないように) */
+export function stateKey(studentId?: string | null): string {
+  return studentId ? `${STORAGE_KEY}:${studentId}` : STORAGE_KEY;
+}
+
+export function readRaw(key: string = STORAGE_KEY): string | null {
   try {
-    return localStorage.getItem(STORAGE_KEY);
+    return localStorage.getItem(key);
   } catch {
     return null;
   }
 }
 
 /** 保存に成功したら true */
-export function writeRaw(json: string): boolean {
+export function writeRaw(json: string, key: string = STORAGE_KEY): boolean {
   try {
-    localStorage.setItem(STORAGE_KEY, json);
+    localStorage.setItem(key, json);
     return true;
   } catch {
     return false;
   }
 }
 
-export function removeRaw() {
+export function removeRaw(key: string = STORAGE_KEY) {
   try {
-    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(key);
   } catch {
     /* ignore */
   }
@@ -84,4 +89,77 @@ export function formatAgo(t: number | null): string {
   const h = Math.floor(min / 60);
   if (h < 24) return `${h} 時間前`;
   return `${Math.floor(h / 24)} 日前`;
+}
+
+/** この端末にある記録をすべて (ゲスト + ログインした生徒ぶん) 集める。救出用 */
+export function readAllRaw(): Record<string, string> {
+  const out: Record<string, string> = {};
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(STORAGE_KEY)) out[k] = localStorage.getItem(k) ?? "";
+    }
+  } catch {
+    /* ignore */
+  }
+  return out;
+}
+
+// ------------------------------------------------------------------
+// ログイン情報のヒント (秘密ではない。本物の認証は HttpOnly Cookie)
+// ------------------------------------------------------------------
+export interface StudentInfo {
+  id: string;
+  number: string;
+  name: string;
+  className: string;
+}
+export type AuthHint = { mode: "guest" } | { mode: "student"; student: StudentInfo };
+const AUTH_KEY = "inquiry-buddy-lite-auth";
+
+export function getAuthHint(): AuthHint | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(AUTH_KEY) || "null");
+    if (v?.mode === "guest") return { mode: "guest" };
+    if (v?.mode === "student" && typeof v.student?.id === "string") return v;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+export function setAuthHint(h: AuthHint | null) {
+  try {
+    if (h) localStorage.setItem(AUTH_KEY, JSON.stringify(h));
+    else localStorage.removeItem(AUTH_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+// ------------------------------------------------------------------
+// サーバ同期の状態 (生徒ごと): サーバの版と、まだ送っていない変更があるか
+// ------------------------------------------------------------------
+export interface SyncMeta {
+  version: number;
+  dirty: boolean;
+  syncedAt: number | null;
+}
+
+export function getSyncMeta(key: string): SyncMeta {
+  try {
+    const v = JSON.parse(localStorage.getItem(key + ":sync") || "null");
+    if (v && typeof v.version === "number") return { version: v.version, dirty: !!v.dirty, syncedAt: v.syncedAt ?? null };
+  } catch {
+    /* ignore */
+  }
+  return { version: 0, dirty: false, syncedAt: null };
+}
+
+export function setSyncMeta(key: string, m: SyncMeta) {
+  try {
+    localStorage.setItem(key + ":sync", JSON.stringify(m));
+  } catch {
+    /* ignore */
+  }
 }
