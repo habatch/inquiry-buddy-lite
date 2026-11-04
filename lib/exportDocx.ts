@@ -11,6 +11,7 @@ import { STEPS } from "./steps";
 import { AGE_OPTIONS, INTEREST_CATEGORIES } from "./topics";
 import { answerKey, type AppState } from "./state";
 import { kindMeta, STATUS_META } from "./actions";
+import { saveBlob } from "./file";
 
 const blank = () => new Paragraph({ children: [new TextRun("")] });
 
@@ -160,15 +161,4 @@ export async function downloadDocx(st: AppState, score: number, rankName: string
   const doc = new Document({ sections: [{ properties: {}, children: out }] });
   const blob = await Packer.toBlob(doc);
   saveBlob(blob, `探究記録_${new Date().toISOString().slice(0, 10)}.docx`);
-}
-
-export function saveBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

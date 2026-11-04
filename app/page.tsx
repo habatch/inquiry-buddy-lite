@@ -31,7 +31,17 @@ import {
   stepStatus,
   type AppState,
 } from "@/lib/state";
-import { downloadDocx, saveBlob } from "@/lib/exportDocx";
+import { saveBlob } from "@/lib/file";
+import {
+  formatAgo,
+  getBackupAt,
+  readRaw,
+  removeRaw,
+  requestPersist,
+  setBackupAt,
+  storageWritable,
+  writeRaw,
+} from "@/lib/storage";
 import { ActionBoard, KitCard, makeActionFromKit } from "@/components/ActionBoard";
 import { InfoHub } from "@/components/InfoHub";
 import { ACTION_KITS, kindMeta, STATUS_META, type Action } from "@/lib/actions";
@@ -47,6 +57,13 @@ export default function Home() {
   const [rankUpToast, setRankUpToast] = useState<Rank | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [view, setView] = useState<View>("steps");
+  /** saved: 保存済み / pending: 保存待ち / error: 保存できない */
+  const [saveState, setSaveState] = useState<"saved" | "pending" | "error">("saved");
+  const [backupAt, setBackupAtState] = useState<number | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const lastWrittenRef = useRef<string | null>(null);
+  const stRef = useRef(st);
+  stRef.current = st;
   const prevRankRef = useRef<Rank>(RANKS[0]);
   const fileRef = useRef<HTMLInputElement>(null);
   const topRef = useRef<HTMLDivElement>(null);
@@ -59,28 +76,80 @@ export default function Home() {
 
   // 復元
   useEffect(() => {
+    const raw = readRaw();
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
       const parsed = raw ? parseState(JSON.parse(raw)) : null;
       if (parsed) {
         setSt(parsed);
+        lastWrittenRef.current = JSON.stringify(parsed);
         prevRankRef.current = getCurrentRank(computeScore(parsed));
       }
     } catch {
-      /* 保存領域が使えない環境でも動くようにする */
+      /* 壊れたデータでも起動はする */
     }
+    if (!storageWritable()) setSaveState("error");
+    setBackupAtState(getBackupAt());
+    void requestPersist();
     setHydrated(true);
   }, []);
 
-  // 保存
+  // 保存: 入力のたびではなく 0.4 秒まとめて書く (低スペック端末で入力が重くならないように)
+  const flush = () => {
+    const json = JSON.stringify(stRef.current);
+    if (json === lastWrittenRef.current) {
+      setSaveState((s) => (s === "pending" ? "saved" : s));
+      return;
+    }
+    if (writeRaw(json)) {
+      lastWrittenRef.current = json;
+      setSaveState("saved");
+    } else {
+      setSaveState("error");
+    }
+  };
   useEffect(() => {
     if (!hydrated) return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
-    } catch {
-      /* ignore */
-    }
+    if (JSON.stringify(st) === lastWrittenRef.current) return;
+    setSaveState((s) => (s === "error" ? s : "pending"));
+    const t = setTimeout(flush, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated, st]);
+
+  // タブを閉じる・切り替える・PC がスリープする直前に必ず保存
+  useEffect(() => {
+    if (!hydrated) return;
+    const onHide = () => flush();
+    const onVis = () => document.visibilityState === "hidden" && flush();
+    window.addEventListener("pagehide", onHide);
+    window.addEventListener("beforeunload", onHide);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      window.removeEventListener("beforeunload", onHide);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated]);
+
+  // 同じ端末で 2 つのタブを開いたとき、古いタブが新しい記録を上書きしないよう同期する
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== STORAGE_KEY || !e.newValue || e.newValue === lastWrittenRef.current) return;
+      try {
+        const parsed = parseState(JSON.parse(e.newValue));
+        if (!parsed) return;
+        lastWrittenRef.current = e.newValue;
+        prevRankRef.current = getCurrentRank(computeScore(parsed));
+        setSt(parsed);
+        setNotice("別のタブで書いた内容を反映しました。同じ記録を 2 つのタブで開くのは避けよう。");
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   // ランクアップ演出 (上がったときだけ)
   useEffect(() => {
@@ -124,6 +193,8 @@ export default function Home() {
     if (!confirm("プロフィール・回答・スコアをすべて消して最初からやり直しますか？\n(消す前に「バックアップ保存」しておくと安心です)"))
       return;
     setSt(EMPTY_STATE);
+    lastWrittenRef.current = null;
+    removeRaw();
     prevRankRef.current = RANKS[0];
   }
 
@@ -132,6 +203,9 @@ export default function Home() {
       type: "application/json",
     });
     saveBlob(blob, `探究ノート_バックアップ_${new Date().toISOString().slice(0, 10)}.json`);
+    const now = Date.now();
+    setBackupAt(now);
+    setBackupAtState(now);
   }
 
   async function loadBackup(file: File) {
@@ -148,10 +222,19 @@ export default function Home() {
   }
 
   async function exportWord() {
+    setExporting(true);
     try {
+      // Word 出力ライブラリは大きいので、ボタンを押したときだけ読み込む
+      const { downloadDocx } = await import("@/lib/exportDocx");
       await downloadDocx(st, score, getCurrentRank(score).nameJa);
     } catch (e) {
-      setNotice("Word 保存でエラー: " + (e instanceof Error ? e.message : String(e)));
+      setNotice(
+        "Word 保存でエラー: " +
+          (e instanceof Error ? e.message : String(e)) +
+          "\n回線が混んでいるときは、少し待ってからもう一度押してみてね。",
+      );
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -213,16 +296,17 @@ export default function Home() {
       </div>
       <button
         onClick={exportWord}
-        disabled={!hasAnswers}
+        disabled={!hasAnswers || exporting}
         className="w-full rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2.5 shadow-sm disabled:bg-stone-200 disabled:text-stone-500 disabled:cursor-not-allowed transition"
       >
-        📝 探究記録を Word で保存
+        {exporting ? "準備中…" : "📝 探究記録を Word で保存"}
       </button>
       <div className="rounded-lg border border-stone-200 p-3 text-xs text-stone-600 leading-relaxed">
         <p className="font-semibold text-stone-700">💾 記録の保存場所</p>
         <p className="mt-1">
           記録はこの端末のブラウザの中だけに保存され、どこにも送信されません。別の端末で続けるときや、ブラウザのデータを消す前は、バックアップを保存しておこう。
         </p>
+        <p className="mt-1.5 text-stone-500">最後のバックアップ: {formatAgo(backupAt)}</p>
         <div className="mt-2 flex gap-2">
           <button onClick={saveBackup} className="flex-1 rounded-md bg-stone-100 px-2 py-1.5 hover:bg-stone-200">
             バックアップ保存
@@ -259,6 +343,18 @@ export default function Home() {
             <p className="truncate text-xs text-stone-500">答えは書いていない。自分で考えるための探究ワークブック</p>
           </div>
         </div>
+        <span
+          className={`ml-auto mr-2 shrink-0 rounded-md px-2 py-1 text-xs ${
+            saveState === "error"
+              ? "bg-rose-100 font-semibold text-rose-700"
+              : saveState === "pending"
+                ? "text-stone-400"
+                : "text-brand-700"
+          }`}
+          role="status"
+        >
+          {saveState === "error" ? "⚠ 保存できていません" : saveState === "pending" ? "保存中…" : "✓ 保存済み"}
+        </span>
         <button
           onClick={fullReset}
           className="shrink-0 rounded-md bg-stone-50 px-3 py-1.5 text-xs text-stone-500 hover:bg-stone-200"
@@ -318,6 +414,18 @@ export default function Home() {
           </div>
 
           <div className="mx-auto max-w-3xl space-y-4 px-4 py-5 sm:px-6">
+            {saveState === "error" && (
+              <div className="rounded-md border-2 border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+                <p className="font-bold">⚠ このブラウザでは記録が自動保存されていません</p>
+                <p className="mt-1 text-xs leading-relaxed">
+                  プライベート (シークレット) モードや、ブラウザの設定・容量不足が原因かもしれません。このまま閉じると書いた内容が消えます。
+                  通常のウィンドウで開き直すか、こまめに「バックアップ保存」してください。
+                </p>
+                <button onClick={saveBackup} className="mt-2 rounded-md bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-700">
+                  今すぐバックアップ保存
+                </button>
+              </div>
+            )}
             {notice && (
               <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                 <span className="flex-1">{notice}</span>
