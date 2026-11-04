@@ -5,6 +5,7 @@ import {
   SCORE_STEP_TRANSITION,
 } from "./ranks";
 import type { UserProfile } from "./topics";
+import { ACTION_KINDS, actionsScore, type Action } from "./actions";
 
 export const STORAGE_KEY = "inquiry-buddy-lite-v1";
 
@@ -17,6 +18,8 @@ export interface AppState {
   checks: Record<string, boolean>;
   /** 「次へ進む」ボーナスを受け取ったステップ */
   advanced: number[];
+  /** 行動ボードの行動 */
+  actions: Action[];
 }
 
 export const EMPTY_STATE: AppState = {
@@ -25,6 +28,7 @@ export const EMPTY_STATE: AppState = {
   answers: {},
   checks: {},
   advanced: [],
+  actions: [],
 };
 
 export const answerKey = (step: number, fieldId: string) => `${step}.${fieldId}`;
@@ -60,6 +64,7 @@ export function stepStatus(s: StepDef, st: AppState) {
  *  - 各回答: ranks.ts の scoreFromUserMessage (4 + 文字数×0.12、上限 28)
  *  - ステップの記入とチェックがすべてそろう: +30
  *  - 「次へ進む」を押した: +50 (各ステップ 1 回)
+ *  - 行動ボードで「できた」+ 振り返りを書いた行動: +10 + 振り返りの文字数分 (20 件まで)
  */
 export function computeScore(st: AppState): number {
   let score = 0;
@@ -70,6 +75,7 @@ export function computeScore(st: AppState): number {
     if (stepStatus(s, st).ready) score += SCORE_NEXT_READY;
   }
   score += st.advanced.length * SCORE_STEP_TRANSITION;
+  score += actionsScore(st.actions);
   return score;
 }
 
@@ -105,5 +111,23 @@ export function parseState(raw: unknown): AppState | null {
     advanced: Array.isArray(d.advanced)
       ? d.advanced.filter((n): n is number => typeof n === "number")
       : [],
+    actions: Array.isArray(d.actions) ? d.actions.map(parseAction).filter((a): a is Action => !!a) : [],
+  };
+}
+
+function parseAction(x: unknown): Action | null {
+  if (!x || typeof x !== "object") return null;
+  const a = x as Partial<Action>;
+  if (typeof a.id !== "string" || typeof a.title !== "string") return null;
+  return {
+    id: a.id,
+    title: a.title,
+    kind: ACTION_KINDS.some((k) => k.id === a.kind) ? (a.kind as Action["kind"]) : "research",
+    status: a.status === "doing" || a.status === "done" ? a.status : "todo",
+    due: typeof a.due === "string" ? a.due : undefined,
+    memo: typeof a.memo === "string" ? a.memo : "",
+    learned: typeof a.learned === "string" ? a.learned : "",
+    step: typeof a.step === "number" ? a.step : undefined,
+    createdAt: typeof a.createdAt === "number" ? a.createdAt : Date.now(),
   };
 }

@@ -32,6 +32,12 @@ import {
   type AppState,
 } from "@/lib/state";
 import { downloadDocx, saveBlob } from "@/lib/exportDocx";
+import { ActionBoard, KitCard, makeActionFromKit } from "@/components/ActionBoard";
+import { InfoHub } from "@/components/InfoHub";
+import { ACTION_KITS, kindMeta, STATUS_META, type Action } from "@/lib/actions";
+import { themeTerms } from "@/lib/relevance";
+
+type View = "steps" | "actions" | "info";
 
 const rankIndex = (r: Rank) => RANKS.findIndex((x) => x.id === r.id);
 
@@ -40,6 +46,7 @@ export default function Home() {
   const [hydrated, setHydrated] = useState(false);
   const [rankUpToast, setRankUpToast] = useState<Rank | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [view, setView] = useState<View>("steps");
   const prevRankRef = useRef<Rank>(RANKS[0]);
   const fileRef = useRef<HTMLInputElement>(null);
   const topRef = useRef<HTMLDivElement>(null);
@@ -90,7 +97,14 @@ export default function Home() {
       const k = checkKey(step, i);
       return { ...s, checks: { ...s.checks, [k]: !s.checks[k] } };
     });
+  const setActions = (fn: (prev: Action[]) => Action[]) =>
+    setSt((s) => ({ ...s, actions: fn(s.actions) }));
+  const goView = (v: View) => {
+    setView(v);
+    topRef.current?.scrollTo({ top: 0 });
+  };
   const goStep = (n: number) => {
+    setView("steps");
     setSt((s) => ({ ...s, step: n }));
     topRef.current?.scrollTo({ top: 0 });
   };
@@ -160,7 +174,30 @@ export default function Home() {
   const nextLocked = !!nextStep?.unlockScore && score < nextStep.unlockScore;
   const bonusClaimed = st.advanced.includes(step.id);
   const ans = (k: string) => st.answers[k] ?? "";
-  const hasAnswers = Object.values(st.answers).some((v) => v.trim());
+  const hasAnswers = Object.values(st.answers).some((v) => v.trim()) || st.actions.length > 0;
+  // テンプレートに差し込む、生徒自身の言葉
+  const vars: Record<string, string> = {
+    問い: ans("2.question") || ans("2.draft") || st.profile.customTopic || "",
+    仮説: ans("3.hypothesis"),
+    キーワード: ans("4.keywords"),
+    分かったこと: ans("7.found"),
+  };
+  // 情報ハブのキーワード候補
+  const suggestions = Array.from(
+    new Set(
+      [ans("4.keywords"), ...themeTerms(st.profile.customTopic, st.profile.otherInterest), ans("2.question")]
+        .map((x) => x.trim())
+        .filter((x) => x.length >= 2),
+    ),
+  ).slice(0, 5);
+  const stepKits = ACTION_KITS.filter((k) => k.steps.includes(step.id)).slice(0, 3);
+  const stepActions = st.actions.filter((a) => a.step === step.id);
+  const openActions = st.actions.filter((a) => a.status !== "done").length;
+  const tabs: { id: View; label: string }[] = [
+    { id: "steps", label: `📘 ステップ ${step.id}` },
+    { id: "actions", label: `🚀 行動ボード${openActions ? ` (${openActions})` : ""}` },
+    { id: "info", label: "🔎 情報ハブ" },
+  ];
 
   const sidebarExtras = (
     <>
@@ -170,6 +207,7 @@ export default function Home() {
           <li>くわしく書くほどスコアが入る (1 つの欄で最大 28 pt)</li>
           <li>記入とチェックがそろうと +{SCORE_NEXT_READY} pt</li>
           <li>次のステップへ進むと +{SCORE_STEP_TRANSITION} pt</li>
+          <li>行動ボードで「できた」+ 振り返りで +10 pt〜</li>
           <li>700 pt で朱雀ステップ、800 pt で麒麟ステップが解放</li>
         </ul>
       </div>
@@ -229,6 +267,21 @@ export default function Home() {
         </button>
       </header>
 
+      <nav className="flex gap-1 overflow-x-auto border-b border-stone-200 bg-white px-3 sm:px-5" aria-label="画面切り替え">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => goView(t.id)}
+            aria-current={view === t.id ? "page" : undefined}
+            className={`whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium ${
+              view === t.id ? "border-brand-600 text-brand-700" : "border-transparent text-stone-500 hover:text-stone-800"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar (PC) */}
         <aside className="hidden w-72 shrink-0 space-y-4 overflow-y-auto border-r border-stone-200 bg-white p-4 md:block">
@@ -274,6 +327,24 @@ export default function Home() {
               </div>
             )}
 
+            {view === "actions" && (
+              <ActionBoard
+                actions={st.actions}
+                setActions={setActions}
+                vars={vars}
+                currentStep={step.id}
+                onOpenInfo={() => goView("info")}
+              />
+            )}
+            {view === "info" && (
+              <InfoHub
+                suggestions={suggestions}
+                interests={st.profile.interests}
+                currentStep={step.id}
+                onAddAction={(a) => setActions((prev) => [a, ...prev])}
+              />
+            )}
+            {view === "steps" && (<>
             {/* Step header */}
             <div>
               <div className="flex items-center gap-2">
@@ -332,6 +403,39 @@ export default function Home() {
                 />
               </div>
             ))}
+
+            {/* このステップで起こせる行動 */}
+            <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-sky-900">🚀 このステップで起こせる行動</h3>
+                <div className="flex gap-3 text-xs font-medium">
+                  <button onClick={() => goView("info")} className="text-sky-800 hover:underline">🔎 情報ハブで調べる</button>
+                  <button onClick={() => goView("actions")} className="text-sky-800 hover:underline">行動ボードへ →</button>
+                </div>
+              </div>
+              <p className="mt-1 text-xs text-sky-900/80">書くだけで止まらず、実際に動いてみよう。下書き付きのキットを行動ボードに追加できるよ。</p>
+              {stepActions.length > 0 && (
+                <ul className="mt-3 space-y-1">
+                  {stepActions.map((a) => (
+                    <li key={a.id} className="flex items-center gap-2 text-xs text-stone-700">
+                      <span>{kindMeta(a.kind).icon}</span>
+                      <span className="flex-1 truncate">{a.title}</span>
+                      <span className={`rounded px-1.5 py-0.5 ${STATUS_META[a.status].color}`}>{STATUS_META[a.status].label}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="mt-3 grid gap-2">
+                {stepKits.map((kit) => (
+                  <KitCard
+                    key={kit.id}
+                    kit={kit}
+                    vars={vars}
+                    onAdd={() => setActions((prev) => [makeActionFromKit(kit, vars, step.id), ...prev])}
+                  />
+                ))}
+              </div>
+            </div>
 
             {/* Checklist */}
             <div className={`rounded-xl border-2 bg-white p-4 shadow-sm ${status.ready ? "border-brand-400" : "border-dashed border-stone-300"}`}>
@@ -399,6 +503,8 @@ export default function Home() {
                 <p className="mt-1 text-sm opacity-90">記録を Word で保存して、「最初の一歩」を踏み出そう。お疲れさま！</p>
               </div>
             )}
+
+            </>)}
 
             {/* Mobile extras */}
             <div className="space-y-3 pt-2 md:hidden">{sidebarExtras}</div>

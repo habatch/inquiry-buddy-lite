@@ -10,6 +10,7 @@ import {
 import { STEPS } from "./steps";
 import { AGE_OPTIONS, INTEREST_CATEGORIES } from "./topics";
 import { answerKey, type AppState } from "./state";
+import { kindMeta, STATUS_META } from "./actions";
 
 const blank = () => new Paragraph({ children: [new TextRun("")] });
 
@@ -110,6 +111,39 @@ export async function downloadDocx(st: AppState, score: number, rankName: string
         }),
         ...textLines(st.answers[answerKey(s.id, f.id)].trim()),
       );
+    }
+    out.push(blank());
+  }
+
+  if (st.actions.length > 0) {
+    out.push(
+      new Paragraph({
+        heading: HeadingLevel.HEADING_1,
+        children: [new TextRun({ text: "🚀 行動の記録", bold: true })],
+      }),
+    );
+    for (const a of [...st.actions].sort((x, y) => x.createdAt - y.createdAt)) {
+      const k = kindMeta(a.kind);
+      out.push(
+        new Paragraph({
+          spacing: { before: 160 },
+          children: [
+            new TextRun({ text: `■ ${k.icon} ${a.title}`, bold: true, color: "0F766E", size: 20 }),
+            new TextRun({
+              text: `  [${STATUS_META[a.status].label}${a.due ? ` / 予定日 ${a.due}` : ""}]`,
+              color: "666666",
+              size: 18,
+            }),
+          ],
+        }),
+      );
+      if (a.memo.trim()) out.push(...textLines(a.memo.trim()));
+      if (a.learned.trim()) {
+        out.push(
+          new Paragraph({ children: [new TextRun({ text: "分かったこと:", bold: true, size: 20 })] }),
+          ...textLines(a.learned.trim()),
+        );
+      }
     }
     out.push(blank());
   }
