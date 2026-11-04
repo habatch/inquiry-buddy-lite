@@ -142,9 +142,17 @@ export async function createSession(env: Env, kind: Kind, subjectId: string): Pr
   const token = randomId(32);
   const now = Date.now();
   const expires = now + days * 86400_000;
-  await env.DB.prepare("INSERT INTO sessions (token_hash, kind, subject_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)")
-    .bind(await sha256(token), kind, subjectId, expires, now)
-    .run();
+  await env.DB.batch([
+    // 期限切れのセッションを片付ける (同じ人の分だけなので軽い)
+    env.DB.prepare("DELETE FROM sessions WHERE subject_id = ? AND expires_at < ?").bind(subjectId, now),
+    env.DB.prepare("INSERT INTO sessions (token_hash, kind, subject_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)").bind(
+      await sha256(token),
+      kind,
+      subjectId,
+      expires,
+      now,
+    ),
+  ]);
   return `${COOKIE[kind]}=${token}; Path=/api; HttpOnly; Secure; SameSite=Strict; Max-Age=${days * 86400}`;
 }
 

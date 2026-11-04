@@ -1,8 +1,8 @@
 name: Deploy to GitHub Pages
 
+# 本番は Cloudflare Pages (npm run deploy)。GitHub Pages では API (ログイン・同期) が動かないため、
+# 自動デプロイは停止し、必要なときだけ手動で実行する。
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
