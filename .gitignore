@@ -6,3 +6,6 @@ out/
 *.tsbuildinfo
 next-env.d.ts
 .wrangler/
+
+# Obsidian 自身の設定
+vault/.obsidian/
