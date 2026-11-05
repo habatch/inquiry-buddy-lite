@@ -49,7 +49,7 @@ import {
   type StudentInfo,
 } from "@/lib/storage";
 import { LoginScreen } from "@/components/LoginScreen";
-import { useCloudSync, type CloudStatus } from "@/lib/useCloudSync";
+import { conflictKey, useCloudSync, type CloudStatus } from "@/lib/useCloudSync";
 import { api } from "@/lib/api";
 import { ActionBoard, makeActionFromKit } from "@/components/ActionBoard";
 import { StepActions } from "@/components/StepActions";
@@ -139,6 +139,8 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
   const [saveState, setSaveState] = useState<"saved" | "pending" | "error">("saved");
   const [backupAt, setBackupAtState] = useState<number | null>(null);
   const [exporting, setExporting] = useState(false);
+  /** 食い違いで保管した、この端末の内容 (無ければ null) */
+  const [conflictRaw, setConflictRaw] = useState<string | null>(null);
   const lastWrittenRef = useRef<string | null>(null);
   const stRef = useRef(st);
   stRef.current = st;
@@ -167,6 +169,7 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
     }
     if (!storageWritable()) setSaveState("error");
     setBackupAtState(getBackupAt());
+    setConflictRaw(readRaw(conflictKey(storeKey)));
     void requestPersist();
     setHydrated(true);
   }, []);
@@ -249,6 +252,7 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
     st,
     adopt,
     notify: setNotice,
+    onBackup: () => setConflictRaw(readRaw(conflictKey(storeKey))),
   });
   const [relogin, setRelogin] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
@@ -262,6 +266,14 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
         !confirm("まだサーバに送れていない記録があります。今ログアウトすると、その分はこの端末に残ります。\nログアウトしますか？")
       )
         return;
+      if (
+        conflictRaw &&
+        !cloud.isDirty() &&
+        !confirm(
+          "別の端末との食い違いで保管した記録が、この端末に残っています。ログアウトすると消えます (共用の端末で次の人に見えないようにするため)。\n残したい場合は「キャンセル」を押し、画面の「保管した内容を書き出す」でファイルに保存してください。\nログアウトしますか？",
+        )
+      )
+        return;
       try {
         await api("/student/logout", { method: "POST", json: {} });
       } catch {
@@ -271,6 +283,7 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
       if (!cloud.isDirty()) {
         removeRaw(storeKey);
         removeRaw(storeKey + ":sync");
+        removeRaw(conflictKey(storeKey));
       }
     }
     onSignedOut();
@@ -323,6 +336,48 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
     const now = Date.now();
     setBackupAt(now);
     setBackupAtState(now);
+  }
+
+  /** 食い違いで保管した内容を、バックアップと同じ形のファイルに書き出す (「バックアップから復元」で読み込める) */
+  function exportConflict() {
+    if (!conflictRaw) return;
+    try {
+      const parsed = parseState(JSON.parse(conflictRaw));
+      if (!parsed) throw new Error();
+      const blob = new Blob([JSON.stringify({ app: "inquiry-buddy-lite", version: 1, ...parsed }, null, 2)], { type: "application/json" });
+      saveBlob(blob, `探究ノート_保管した内容_${new Date().toISOString().slice(0, 10)}.json`);
+    } catch {
+      setNotice("保管した内容を読み取れませんでした");
+    }
+  }
+
+  /** 保管した内容と、今表示している内容を入れ替える (今の内容は代わりに保管するので、もう一度押せば元に戻る) */
+  function swapConflict() {
+    if (!conflictRaw) return;
+    const parsed = (() => {
+      try {
+        return parseState(JSON.parse(conflictRaw));
+      } catch {
+        return null;
+      }
+    })();
+    if (!parsed) {
+      setNotice("保管した内容を読み取れませんでした");
+      return;
+    }
+    if (!confirm("保管した内容を表示し、先生にもこちらを届けます。\n今表示している内容は代わりに保管するので、もう一度このボタンを押せば元に戻せます。よろしいですか？")) return;
+    const current = JSON.stringify(stRef.current);
+    writeRaw(current, conflictKey(storeKey));
+    setConflictRaw(current);
+    prevRankRef.current = getCurrentRank(computeScore(parsed));
+    setSt(parsed);
+    setNotice("保管していた内容に入れ替えました");
+  }
+
+  function dropConflict() {
+    if (!confirm("保管した内容を消します。元に戻せません。よろしいですか？")) return;
+    removeRaw(conflictKey(storeKey));
+    setConflictRaw(null);
   }
 
   async function loadBackup(file: File) {
@@ -614,6 +669,37 @@ function Notebook({ student, onSignedOut }: { student: StudentInfo | null; onSig
                 </button>
               </div>
             )}
+            {student && cloud.status === "closed" && (
+              <div className="rounded-md border-2 border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <p className="font-bold">⏸ このクラスは今、先生に記録を届けられません</p>
+                <p className="mt-1 text-xs leading-relaxed">
+                  学校での利用が止まっているか、クラスが終了しています。書いた内容はこの端末に保存されています。先生に確認してください。
+                  心配なときは「バックアップ保存」でファイルにも残せます。
+                </p>
+                <button onClick={saveBackup} className="mt-2 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700">
+                  バックアップ保存
+                </button>
+              </div>
+            )}
+            {student && conflictRaw && (
+              <div className="rounded-md border-2 border-sky-300 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                <p className="font-bold">🧩 別の端末の記録と食い違ったので、この端末で書いた内容を保管しています</p>
+                <p className="mt-1 text-xs leading-relaxed">
+                  今表示しているのは、新しかった方 (別の端末で書いた方) の記録です。保管した内容は、ファイルに書き出して見比べたり、こちらに入れ替えたりできます。
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button onClick={exportConflict} className="rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-700">
+                    保管した内容を書き出す
+                  </button>
+                  <button onClick={swapConflict} className="rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-sky-800 ring-1 ring-sky-300 hover:bg-sky-100">
+                    保管した内容に入れ替える
+                  </button>
+                  <button onClick={dropConflict} className="rounded-md px-3 py-1.5 text-xs text-stone-500 hover:bg-stone-100">
+                    保管した内容を消す
+                  </button>
+                </div>
+              </div>
+            )}
             {saveState === "error" && (
               <div className="rounded-md border-2 border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-900">
                 <p className="font-bold">⚠ このブラウザでは記録が自動保存されていません</p>
@@ -811,6 +897,7 @@ function CloudBadge({ status, syncedAt, onSync }: { status: CloudStatus; syncedA
     pending: { text: "☁ まもなく共有", cls: "text-stone-500" },
     offline: { text: "☁ 未共有 (通信待ち)", cls: "text-amber-700" },
     auth: { text: "☁ 要ログイン", cls: "bg-amber-100 font-semibold text-amber-800" },
+    closed: { text: "☁ 共有できません (クラス停止中)", cls: "bg-amber-100 font-semibold text-amber-800" },
   };
   const m = map[status];
   return (
