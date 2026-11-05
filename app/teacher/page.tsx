@@ -312,11 +312,27 @@ function ClassList({ onOpen }: { onOpen: (id: string) => void }) {
 // ------------------------------------------------------------------
 type SortKey = "number" | "step" | "score" | "updated_at";
 
+/** 支援が要りそうな生徒を探すための絞り込み (一覧の表示だけ。CSV は全員) */
+type Filter = "all" | "unstarted" | "notToday" | "stale";
+const STALE_MS = 7 * 86400_000;
+const startOfToday = () => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+};
+const FILTERS: { id: Filter; label: string; test: (r: ProgressRow) => boolean }[] = [
+  { id: "all", label: "すべて", test: () => true },
+  { id: "unstarted", label: "未開始", test: (r) => !r.updated_at },
+  { id: "notToday", label: "今日まだ書いていない", test: (r) => (r.updated_at ?? 0) < startOfToday() },
+  { id: "stale", label: "7日以上止まっている", test: (r) => !!r.updated_at && Date.now() - r.updated_at > STALE_MS },
+];
+
 function ClassView({ classId, onBack, onStudent }: { classId: string; onBack: () => void; onStudent: (id: string) => void }) {
   const [cls, setCls] = useState<{ id: string; name: string } | null>(null);
   const [rows, setRows] = useState<ProgressRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sort, setSort] = useState<SortKey>("number");
+  const [filter, setFilter] = useState<Filter>("all");
   const [codes, setCodes] = useState<NewCode[] | null>(null);
   const [loadedAt, setLoadedAt] = useState<number | null>(null);
 
@@ -346,6 +362,7 @@ function ClassView({ classId, onBack, onStudent }: { classId: string; onBack: ()
     else r.sort((a, b) => (b[sort] ?? -1) - (a[sort] ?? -1));
     return r;
   }, [rows, sort]);
+  const shown = useMemo(() => sorted.filter(FILTERS.find((f) => f.id === filter)!.test), [sorted, filter]);
 
   const stats = useMemo(() => {
     const list = rows ?? [];
@@ -435,6 +452,28 @@ function ClassView({ classId, onBack, onStudent }: { classId: string; onBack: ()
           まだ生徒が登録されていません。下の「名簿を登録」から追加してください。
         </p>
       ) : (
+        <>
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="一覧の絞り込み">
+          <span className="mr-1 text-xs text-stone-500">絞り込み:</span>
+          {FILTERS.map((f) => {
+            const n = sorted.filter(f.test).length;
+            return (
+              <button
+                key={f.id}
+                onClick={() => setFilter(f.id)}
+                aria-pressed={filter === f.id}
+                className={`rounded-full px-3 py-1 text-xs ${
+                  filter === f.id ? "bg-brand-600 font-semibold text-white" : "bg-white text-stone-600 ring-1 ring-stone-300 hover:bg-stone-50"
+                }`}
+              >
+                {f.label} {n}
+              </button>
+            );
+          })}
+        </div>
+        {shown.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-stone-300 bg-white px-4 py-6 text-center text-sm text-stone-500">当てはまる生徒はいません。</p>
+        ) : (
         <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white shadow-sm">
           <table className="w-full min-w-[720px] text-sm">
             <thead className="bg-stone-50 text-left text-xs text-stone-500">
@@ -463,10 +502,10 @@ function ClassView({ classId, onBack, onStudent }: { classId: string; onBack: ()
               </tr>
             </thead>
             <tbody>
-              {sorted.map((r) => {
+              {shown.map((r) => {
                 const rk = rankOf(r.rank_id);
                 const st = stepOf(r.step);
-                const stale = r.updated_at && Date.now() - r.updated_at > 7 * 86400_000;
+                const stale = r.updated_at && Date.now() - r.updated_at > STALE_MS;
                 return (
                   <tr key={r.id} onClick={() => onStudent(r.id)} className="cursor-pointer border-t border-stone-100 hover:bg-brand-50/50">
                     <td className="px-3 py-2 tabular-nums text-stone-600">{r.number}</td>
@@ -492,6 +531,8 @@ function ClassView({ classId, onBack, onStudent }: { classId: string; onBack: ()
             </tbody>
           </table>
         </div>
+        )}
+        </>
       )}
 
       <AddStudents classId={classId} onCreated={setCodes} />

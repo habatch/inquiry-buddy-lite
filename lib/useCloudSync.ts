@@ -7,13 +7,17 @@
  * - サーバの版 (version) を覚えておき、別の端末で更新されていたら上書きせずにサーバ側を採用する
  *   (この端末の内容は ":conflict" に退避)
  * - 通信できない・上限に達したときは、端末に保存したまま次の機会に送る
+ * - 学校が停止中・クラスが終了したとき (403) は送るのをやめ、"closed" として画面で知らせる
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "./api";
 import { parseState, type AppState } from "./state";
 import { getSyncMeta, setSyncMeta, writeRaw, type SyncMeta } from "./storage";
 
-export type CloudStatus = "off" | "connecting" | "synced" | "pending" | "syncing" | "offline" | "auth";
+export type CloudStatus = "off" | "connecting" | "synced" | "pending" | "syncing" | "offline" | "auth" | "closed";
+
+/** 食い違ったときに、この端末の内容を保管しておく場所 */
+export const conflictKey = (storeKey: string) => storeKey + ":conflict";
 
 const INTERVAL_MS = Math.max(10, Number(process.env.NEXT_PUBLIC_SYNC_INTERVAL_SEC) || 60) * 1000;
 
@@ -34,8 +38,10 @@ export function useCloudSync(opts: {
   /** サーバの記録で画面を置き換える */
   adopt: (s: AppState) => void;
   notify: (msg: string) => void;
+  /** 食い違いで、この端末の内容を保管したとき */
+  onBackup?: () => void;
 }) {
-  const { enabled, storeKey, hydrated, st, adopt, notify } = opts;
+  const { enabled, storeKey, hydrated, st, adopt, notify, onBackup } = opts;
   const [status, setStatus] = useState<CloudStatus>(enabled ? "connecting" : "off");
   const [syncedAt, setSyncedAt] = useState<number | null>(null);
   const metaRef = useRef<SyncMeta>({ version: 0, dirty: false, syncedAt: null });
@@ -59,14 +65,15 @@ export function useCloudSync(opts: {
       const server = parseState(p.state);
       if (!server) return;
       if (keepLocalBackup && hasContent(stRef.current)) {
-        writeRaw(JSON.stringify(stRef.current), storeKey + ":conflict");
-        notify("別の端末で書いた記録の方が新しかったので、そちらを表示しています。この端末の内容は救出用に保管しました。");
+        writeRaw(JSON.stringify(stRef.current), conflictKey(storeKey));
+        notify("別の端末で書いた記録の方が新しかったので、そちらを表示しています。この端末で書いた内容は保管してあり、ページの一番上の案内から戻せます。");
+        onBackup?.();
       }
       lastJson.current = JSON.stringify(server);
       adopt(server);
       saveMeta({ version: p.version, dirty: false, syncedAt: p.updatedAt });
     },
-    [adopt, notify, saveMeta, storeKey],
+    [adopt, notify, onBackup, saveMeta, storeKey],
   );
 
   const push = useCallback(async () => {
@@ -85,6 +92,7 @@ export function useCloudSync(opts: {
       setStatus(unchanged ? "synced" : "pending");
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setStatus("auth");
+      else if (e instanceof ApiError && e.status === 403) setStatus("closed");
       else if (e instanceof ApiError && e.status === 409 && e.data.progress) {
         adoptServer(e.data.progress as ServerProgress, true);
         setStatus("synced");
@@ -121,7 +129,7 @@ export function useCloudSync(opts: {
     } catch (e) {
       ready.current = true;
       lastJson.current = JSON.stringify(stRef.current);
-      setStatus(e instanceof ApiError && e.status === 401 ? "auth" : "offline");
+      setStatus(e instanceof ApiError && e.status === 401 ? "auth" : e instanceof ApiError && e.status === 403 ? "closed" : "offline");
     }
   }, [enabled, storeKey, saveMeta, adoptServer, push]);
 
@@ -138,7 +146,7 @@ export function useCloudSync(opts: {
     if (j === lastJson.current) return;
     lastJson.current = j;
     if (!metaRef.current.dirty) saveMeta({ ...metaRef.current, dirty: true });
-    setStatus((s) => (s === "auth" || s === "syncing" ? s : "pending"));
+    setStatus((s) => (s === "auth" || s === "syncing" || s === "closed" ? s : "pending"));
   }, [enabled, st, saveMeta]);
 
   // 定期送信 + タブを離れたとき

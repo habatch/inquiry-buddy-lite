@@ -9,12 +9,19 @@ interface Row {
   state: string | null;
   version: number | null;
   updated_at: number | null;
+  archived: number;
+  active: number;
 }
+
+const CLOSED = "このクラスは現在使えません。書いた内容はこの端末に残っています。先生に確認してください。";
+/** 学校が停止中・クラスが終了していれば true (ログイン済みのセッションでも使えなくする) */
+const closed = (r: { archived: number; active: number }) => !!r.archived || !r.active;
 
 async function load(env: Env, studentId: string) {
   return env.DB.prepare(
-    `SELECT s.id, s.number, s.name, c.name AS class_name, p.state, p.version, p.updated_at
-       FROM students s JOIN classes c ON c.id = s.class_id LEFT JOIN progress p ON p.student_id = s.id
+    `SELECT s.id, s.number, s.name, c.name AS class_name, p.state, p.version, p.updated_at, c.archived, sc.active
+       FROM students s JOIN classes c ON c.id = s.class_id JOIN schools sc ON sc.id = c.school_id
+       LEFT JOIN progress p ON p.student_id = s.id
       WHERE s.id = ?`,
   )
     .bind(studentId)
@@ -27,6 +34,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   if (!sid) return fail(401, "ログインしてください");
   const row = await load(env, sid);
   if (!row) return fail(401, "ログインしてください");
+  if (closed(row)) return fail(403, CLOSED);
   return json({
     student: { id: row.id, number: row.number, name: row.name, className: row.class_name },
     progress: row.state ? { state: JSON.parse(row.state), version: row.version, updatedAt: row.updated_at } : null,
@@ -40,6 +48,14 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
 export const onRequestPut: PagesFunction<Env> = async ({ request, env }) => {
   const sid = await getSession(env, request, "student");
   if (!sid) return fail(401, "ログインしてください");
+  const gate = await env.DB.prepare(
+    `SELECT c.archived, sc.active FROM students s JOIN classes c ON c.id = s.class_id JOIN schools sc ON sc.id = c.school_id
+      WHERE s.id = ?`,
+  )
+    .bind(sid)
+    .first<{ archived: number; active: number }>();
+  if (!gate) return fail(401, "ログインしてください");
+  if (closed(gate)) return fail(403, CLOSED);
 
   const text = await request.text();
   if (text.length > MAX_STATE_BYTES) return fail(413, "記録が大きすぎます。不要な行動メモを減らしてください。");
